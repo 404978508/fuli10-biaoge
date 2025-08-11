@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Investment Tracker 2025</title>
+  <style>
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background: #f0f0f0; }
+    .weekly-summary { background: #eef7ff; font-weight: bold; }
+    .positive { background-color: #d0e8ff; }
+    .negative { background-color: #ffd6d6; }
+    .controls { margin: 1em 0; text-align: center; }
+    button { margin: 0 1em; padding: 0.5em 1.2em; font-size: 1em; cursor: pointer; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<h1>投资收益跟踪表 - 2025</h1>
+<h2 style="color:#007bff; text-align:center; font-size:6em; margin-top: 0.5em;">10%复利！</h2>
+<div style="text-align:center; margin-bottom: 1em;">
+  <img src="https://img.icons8.com/color/96/000000/growth.png" onerror="this.style.display='none'" alt="趋势图标" style="vertical-align:middle;">
+  <span style="font-size: 1.2em; color: #333; margin-left: 0.5em;">每日10%复利增长，收益呈指数级上涨！</span>
+</div>
+<div class="controls">
+  <button id="saveBtn">保存数据</button>
+  <button id="resetBtn">重置表格</button>
+</div>
+
+<canvas id="earningsChart" height="100" style="max-width:1000px;margin:auto;display:block;"></canvas>
+<table>
+  <thead>
+    <tr>
+      <th>日期</th>
+      <th>初始资金</th>
+      <th>10%收益</th>
+      <th>实际收益</th>
+      <th>差值</th>
+      <th>当天余额</th>
+      <th>复利10%余额</th>
+      <th>出金提款</th>
+      <th>状态</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+<script>
+"use strict";
+let tableData = [];
+const startDate = new Date(2025, 7, 11); // 修改后的起始日期为2025年8月11日
+const endDate = new Date(2025, 11, 31);
+
+function generateWorkdays() {
+  const days = [];
+  let d = new Date(startDate);
+  while (d <= endDate) {
+    if (d.getDay() !== 0 && d.getDay() !== 6) days.push(new Date(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return days;
+}
+
+function formatDate(date) {
+  return `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2,'0')}-${date.getDate().toString().padStart(2,'0')}`;
+}
+
+function getDayOfWeek(date) {
+  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
+}
+
+function recalculateAll() {
+  let totalEarnings = 0;
+  let weeklyEarnings = 0;
+  const baseAmount = tableData[0].initialFunds;
+  for (let i = 0; i < tableData.length; i++) {
+    const row = tableData[i];
+    if (row.isSummary) continue;
+
+    if (i > 0) {
+      let j = i - 1;
+      while (j >= 0 && tableData[j].isSummary) j--;
+      const prev = tableData[j];
+      if (prev) {
+        row.initialFunds = prev.dailyBalance - prev.withdrawal;
+      }
+    }
+
+    row.expected = row.initialFunds * 0.1;
+    row.difference = row.actual - row.expected;
+    row.dailyBalance = row.initialFunds + row.actual;
+    row.status = row.actual > 0 ? "已输入" : "待输入";
+    row.compound = baseAmount * Math.pow(1.1, row.id + 1);
+
+    totalEarnings += row.actual;
+    weeklyEarnings += row.actual;
+
+    if (row.isFriday) {
+      const summaryRow = tableData[i + 1];
+      if (summaryRow && summaryRow.isSummary) {
+        summaryRow.text = `★ 本周收益累计：${weeklyEarnings.toFixed(2)} 元，总收益：${totalEarnings.toFixed(2)} 元`;
+        weeklyEarnings = 0;
+      }
+    }
+  }
+}
+
+function renderTable() {
+  const tableBody = document.getElementById("tableBody");
+  tableBody.innerHTML = "";
+  tableData.forEach((row) => {
+    const tr = document.createElement("tr");
+    if (row.isSummary) {
+      tr.className = "weekly-summary";
+      const td = document.createElement("td");
+      td.colSpan = 9;
+      td.textContent = row.text;
+      tr.appendChild(td);
+      tableBody.appendChild(tr);
+      return;
+    }
+    const diffClass = row.difference > 0 ? "positive" : row.difference < 0 ? "negative" : "";
+    tr.innerHTML = `
+      <td>${row.dateStr}</td>
+      <td>${row.id === 0 ? `<input id="initial-${row.id}" type="number" value="${row.initialFunds.toFixed(2)}">` : row.initialFunds.toFixed(2)}</td>
+      <td>${row.expected.toFixed(2)}</td>
+      <td><input id="actual-${row.id}" type="number" value="${row.actual.toFixed(2)}"></td>
+      <td class="${diffClass}">${row.actual ? row.difference.toFixed(2) : '--'}</td>
+      <td>${row.actual ? row.dailyBalance.toFixed(2) : '--'}</td>
+      <td>${row.compound.toFixed(2)}</td>
+      <td><input id="withdraw-${row.id}" type="number" value="${row.withdrawal.toFixed(2)}"></td>
+      <td>${row.status}</td>
+    `;
+    tableBody.appendChild(tr);
+    document.getElementById(`actual-${row.id}`).addEventListener("change", e => {
+      row.actual = parseFloat(e.target.value) || 0;
+      recalculateAll();
+      renderTable();
+      drawChart();
+    });
+    document.getElementById(`withdraw-${row.id}`).addEventListener("change", e => {
+      row.withdrawal = parseFloat(e.target.value) || 0;
+      recalculateAll();
+      renderTable();
+    });
+    if (row.id === 0) {
+      document.getElementById(`initial-${row.id}`).addEventListener("change", e => {
+        row.initialFunds = parseFloat(e.target.value) || 0;
+        recalculateAll();
+        renderTable();
+      });
+    }
+  });
+}
+
+function generateTableData() {
+  const workdays = generateWorkdays();
+  const data = [];
+  for (let i = 0; i < workdays.length; i++) {
+    const date = workdays[i];
+    const dow = date.getDay();
+    const isFriday = dow === 5;
+    data.push({
+      id: i,
+      dateStr: `${formatDate(date)} (${getDayOfWeek(date)})`,
+      initialFunds: i === 0 ? 500 : 0,
+      expected: 0,
+      actual: 0,
+      difference: 0,
+      dailyBalance: 0,
+      compound: 0,
+      withdrawal: 0,
+      status: "待输入",
+      isFriday
+    });
+    if (isFriday) data.push({ isSummary: true, text: "" });
+  }
+  return data;
+}
+
+document.getElementById("resetBtn").onclick = () => {
+  if (confirm("确定要重置表格吗？")) {
+    localStorage.removeItem("invest_table");
+    tableData = generateTableData();
+    recalculateAll();
+    renderTable();
+    drawChart();
+  }
+};
+
+document.getElementById("saveBtn").onclick = () => {
+  localStorage.setItem("invest_table", JSON.stringify(tableData));
+  alert("数据已保存");
+  drawChart();
+};
+
+try {
+  const stored = JSON.parse(localStorage.getItem("invest_table"));
+  if (Array.isArray(stored) && stored.length > 5) {
+    tableData = stored;
+  } else {
+    tableData = generateTableData();
+  }
+} catch (e) {
+  tableData = generateTableData();
+}
+recalculateAll();
+renderTable();
+
+function drawChart() {
+  const ctx = document.getElementById("earningsChart").getContext("2d");
+  const labels = tableData.filter(r => !r.isSummary).map(r => r.dateStr);
+  const actuals = tableData.filter(r => !r.isSummary).map(r => r.actual);
+  if (window.earningsChart) window.earningsChart.destroy();
+  window.earningsChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '实际收益趋势',
+        data: actuals,
+        borderColor: '#007bff',
+        backgroundColor: 'rgba(0,123,255,0.1)',
+        fill: true,
+        tension: 0.2
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: { beginAtZero: true }
+      }
+    }
+  });
+}
+window.addEventListener("load", drawChart);
+</script>
+</body>
+</html>
